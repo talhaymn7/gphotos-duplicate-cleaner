@@ -363,7 +363,7 @@ function renderItem(it) {
       ${it.video ? `<span class="tag">▶${dur}</span>` : ""}
       <button class="zoom" title="Büyük göster">🔍</button>
       <span class="best">tutulacak</span>
-      <span class="mark">silinecek</span>
+      <span class="mark">${it.trashed ? "silindi" : "silinecek"}</span>
     </div>
     <div class="meta">
       <div class="res"></div>
@@ -456,7 +456,12 @@ async function markTrashed(ids) {
     selected.delete(id);
     const it = items.get(id);
     if (it) it.trashed = true;
-    document.querySelector(`.item[data-id="${CSS.escape(id)}"]`)?.classList.add("trashed");
+    const el = document.querySelector(`.item[data-id="${CSS.escape(id)}"]`);
+    if (el) {
+      el.classList.remove("selected");
+      el.classList.add("trashed");
+      el.querySelector(".mark").textContent = "silindi";
+    }
   }
   await chrome.storage.local.remove(ids.flatMap((id) => ["i:" + id, "h:" + id, "d:" + id]));
   await chrome.storage.local.set({ sel: [...selected] });

@@ -192,37 +192,65 @@
   // sayacının tam 1 arttığı doğrulanır; bir şey tutmazsa seçim temizlenir, hiçbir şey silinmez.
 
   let bulkStop = false;
-  const COUNT_RE = /^(\d[\d.,]*)\s*(?:öğe\s*)?(?:seçildi|selected)$/i;
+  // "3 seçildi", "3 öğe seçili", "3 selected" ... biçimi dile göre değişiyor
+  const COUNT_RE = /(\d[\d.,]*)\D{0,15}?(?:seçil|selected)/i;
+  // Bir günün bütün fotoğraflarını seçen başlık kutucuğu ("... tüm fotoğrafları seç: Dün")
+  const DAY_CHECKBOX = /(tüm|all)\b/i;
 
+  // Google'ın "N seçildi" yazısı; okunamazsa null
   function selectionCount() {
     for (const el of document.querySelectorAll("div, span, h1, h2")) {
       const text = el.textContent;
-      if (text.length > 40) continue;
+      if (text.length > 40 || !visible(el)) continue;
       const m = text.trim().match(COUNT_RE);
-      if (m && visible(el)) return Number(m[1].replace(/[.,]/g, ""));
+      if (m) return Number(m[1].replace(/[.,]/g, ""));
     }
-    return 0;
+    return null;
   }
 
-  async function clearSelection() {
-    if (!selectionCount()) return;
-    const btn = [...document.querySelectorAll('button, [role="button"]')].find(
+  function clearSelectionButton() {
+    return [...document.querySelectorAll('button, [role="button"]')].find(
       (b) => visible(b) && /(seçimi (temizle|kaldır)|clear selection)/i.test(b.getAttribute("aria-label") || ""),
     );
-    if (btn) btn.click();
-    else document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
-    await waitFor(() => selectionCount() === 0, 3000);
   }
+
+  const selectionActive = () => Boolean(clearSelectionButton());
+
+  async function clearSelection() {
+    const btn = clearSelectionButton();
+    if (!btn) return;
+    btn.click();
+    await waitFor(() => !selectionActive(), 3000);
+  }
+
+  const isTileCheckbox = (cb) => !DAY_CHECKBOX.test(cb.getAttribute("aria-label") || "");
 
   // Öğenin kendi seçim kutucuğu: en yakın ebeveynlerde, komşu öğelere taşmadan aranır
   function tileCheckbox(a) {
     let el = a;
     for (let i = 0; i < 5 && el; i++, el = el.parentElement) {
       if (i > 0 && el.querySelectorAll(PHOTO_LINK).length > 1) break;
-      const cb = el.matches('[role="checkbox"]') ? el : el.querySelector('[role="checkbox"]');
+      const cb = [el, ...el.querySelectorAll('[role="checkbox"]')].find(
+        (c) => c.matches('[role="checkbox"]') && isTileCheckbox(c),
+      );
       if (cb) return cb;
     }
     return null;
+  }
+
+  // Ekranda işaretli olan fotoğraf kutucukları: kutucuk -> fotoğraf id'si
+  function checkedTiles() {
+    const ids = [];
+    for (const cb of document.querySelectorAll('[role="checkbox"][aria-checked="true"]')) {
+      if (!isTileCheckbox(cb)) continue;
+      for (let el = cb.parentElement, i = 0; el && i < 5; el = el.parentElement, i++) {
+        const links = el.querySelectorAll(PHOTO_LINK);
+        if (!links.length) continue;
+        if (links.length === 1) ids.push(photoId(links[0]));
+        break;
+      }
+    }
+    return ids;
   }
 
   async function selectTile(a) {
@@ -235,16 +263,18 @@
     }
     if (!cb) return { ok: false, error: "seçim kutucuğu bulunamadı", html: (a.parentElement?.parentElement?.outerHTML || "").slice(0, 1500) };
     if (cb.getAttribute("aria-checked") === "true") return { ok: true };
-    const before = selectionCount();
+    // Tıklamadan sonra ekranda tam olarak bu öğe işaretlenmiş olmalı, başka hiçbir şey değil
+    const before = new Set(checkedTiles());
     cb.click();
-    const after = await waitFor(() => {
-      const c = selectionCount();
-      return c !== before ? c : null;
-    }, 2000);
-    if (after == null) return { ok: false, error: "seçim sayacı okunamadı", buttons: visibleButtonLabels() };
-    if (after !== before + 1) {
+    if (!(await waitFor(() => cb.getAttribute("aria-checked") === "true", 2000))) {
+      return { ok: false, error: "kutucuk işaretlenmedi", buttons: visibleButtonLabels() };
+    }
+    await sleep(150);
+    const added = checkedTiles().filter((id) => !before.has(id));
+    const id = photoId(a);
+    if (added.length !== 1 || added[0] !== id) {
       cb.click();
-      return { ok: false, error: `bir tıklama ${after - before} öğe seçti` };
+      return { ok: false, error: `bir tıklama ${added.length} öğe seçti`, added };
     }
     return { ok: true };
   }
@@ -326,17 +356,23 @@
     const missing = [...targets].filter((id) => !found.has(id));
     if (!found.size) return { ok: true, trashed: [], missing };
 
+    // Son kontrol: ekranda işaretli olanların hepsi hedef olmalı; sayaç okunabiliyorsa o da tutmalı
+    const stray = checkedTiles().filter((id) => !found.has(id));
+    if (stray.length) return fail({ error: `hedef olmayan ${stray.length} öğe seçili` });
     const count = selectionCount();
-    if (count !== found.size) return fail({ error: `seçili sayı tutmuyor (${count} ≠ ${found.size})` });
+    if (count != null && count !== found.size) return fail({ error: `seçili sayı tutmuyor (${count} ≠ ${found.size})` });
     const del = await waitFor(findDeleteButton, 5000);
     if (!del) return fail({ error: "toplu silme düğmesi bulunamadı", buttons: visibleButtonLabels() });
     const clicked = { del: del.getAttribute("aria-label") };
     del.click();
-    const confirm = await waitFor(findConfirmButton, 5000);
+    // Onay penceresi çıkarsa onayla; çıkmadan seçim kalktıysa doğrudan taşınmış demektir
+    const confirm = await waitFor(() => findConfirmButton() || (!selectionActive() && "direct"), 5000);
     if (!confirm) return fail({ error: "onay penceresi çıkmadı", ...clicked, buttons: visibleButtonLabels() });
-    clicked.confirm = (confirm.textContent || confirm.getAttribute("aria-label") || "").trim();
-    confirm.click();
-    if (!(await waitFor(() => selectionCount() === 0, 30000))) {
+    if (confirm !== "direct") {
+      clicked.confirm = (confirm.textContent || confirm.getAttribute("aria-label") || "").trim();
+      confirm.click();
+    }
+    if (!(await waitFor(() => !selectionActive(), 30000))) {
       return { ok: false, error: "silme doğrulanamadı; Google Fotoğraflar'da kontrol et", ...clicked, trashed: [] };
     }
 

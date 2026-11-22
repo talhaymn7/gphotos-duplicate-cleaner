@@ -39,7 +39,10 @@
   .item { border: 2px solid transparent; border-radius: 10px; padding: 6px; background: var(--bg); }
   .item.selected { border-color: var(--del); background: var(--del-bg); }
   .item.selected img { opacity: .5; }
-  .item.trashed { opacity: .35; pointer-events: none; }
+  .item.trashed { pointer-events: none; }
+  .item.trashed img, .item.trashed .meta { opacity: .35; }
+  .item.trashed .mark { display: block; background: var(--muted); }
+  .item.trashed .best, .item.trashed .zoom { display: none; }
   .thumb { position: relative; aspect-ratio: 1; background: var(--chip); border-radius: 6px; overflow: hidden; cursor: pointer; }
   .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .tag { position: absolute; left: 6px; top: 6px; font-size: 11px; padding: 1px 7px; border-radius: 99px;
