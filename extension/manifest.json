@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Fotoğraf Kopya Bulucu",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Google Fotoğraflar kütüphanendeki kopya fotoğraf ve videoları bulur, çöp kutusuna taşır.",
   "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": ["https://photos.google.com/*", "https://*.googleusercontent.com/*",

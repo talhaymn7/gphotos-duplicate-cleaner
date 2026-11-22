@@ -183,7 +183,7 @@
     if (!confirm) return { ok: false, error: del ? "onay penceresi çıkmadı" : "silme düğmesi bulunamadı" };
     confirm.click();
     // Başarılı olunca Google Fotoğraflar sonraki fotoğrafa ya da ızgaraya geçer
-    const moved = await waitFor(() => !location.pathname.includes(id) || !findConfirmButton(), 8000);
+    const moved = await waitFor(() => !location.pathname.includes(id), 8000);
     return moved ? { ok: true } : { ok: false, error: "silme doğrulanamadı" };
   }
 
@@ -249,6 +249,51 @@
     return { ok: true };
   }
 
+  // Taramada kaydedilen kütüphane sırası: id -> sıra
+  async function loadOrders() {
+    const all = await chrome.storage.local.get(null);
+    const orders = new Map();
+    for (const [k, v] of Object.entries(all)) if (k.startsWith("i:")) orders.set(v.id, v.order);
+    return orders;
+  }
+
+  // Izgarada verilen sıradaki öğeye atlar: ekrandaki öğelerin sırasından ve konumundan
+  // "öğe başına piksel" tahmin edip kaydırır; birkaç adımda hedefe yaklaşır.
+  async function jumpTo(scroller, orders, target) {
+    const isDoc = scroller === document.scrollingElement;
+    let pxPerItem = scroller.scrollHeight / Math.max(orders.size, 1);
+    let tries = 0;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      const vis = [];
+      for (const a of document.querySelectorAll(PHOTO_LINK)) {
+        const o = orders.get(photoId(a));
+        if (o != null && visible(a)) vis.push({ o, top: a.getBoundingClientRect().top });
+      }
+      if (!vis.length) {
+        await sleep(300);
+        continue;
+      }
+      vis.sort((x, y) => x.o - y.o);
+      const first = vis[0];
+      const last = vis[vis.length - 1];
+      if (target >= first.o && target <= last.o) {
+        // Hedef aralıkta: öğeler yeni çiziliyor olabilir, kısa bir süre bekle
+        if (++tries >= 2) return;
+        await sleep(300);
+        continue;
+      }
+      if (last.o > first.o && last.top > first.top) pxPerItem = (last.top - first.top) / (last.o - first.o);
+      const near = target < first.o ? first : last;
+      const viewTop = isDoc ? 0 : scroller.getBoundingClientRect().top;
+      let delta = near.top + (target - near.o) * pxPerItem - viewTop - scroller.clientHeight / 2;
+      if (Math.abs(delta) < 50) delta = Math.sign(target - near.o) * scroller.clientHeight * 0.5;
+      const before = scroller.scrollTop;
+      scroller.scrollTop = before + delta;
+      if (scroller.scrollTop === before) return; // sayfanın başı/sonu
+      await sleep(450);
+    }
+  }
+
   async function bulkTrash(ids, report) {
     bulkStop = false;
     const targets = new Set(ids);
@@ -260,27 +305,21 @@
 
     await clearSelection();
     const scroller = findScroller();
-    scroller.scrollTop = 0;
-    await sleep(1000);
+    const orders = await loadOrders();
+    const queue = [...targets].filter((id) => orders.has(id)).sort((a, b) => orders.get(a) - orders.get(b));
 
-    let stuck = 0;
-    while (!bulkStop && found.size < targets.size) {
+    for (const id of queue) {
+      if (bulkStop) break;
+      if (found.has(id)) continue;
+      await jumpTo(scroller, orders, orders.get(id));
+      // Hedefe yakın başka hedefler de olabilir: ekrana gelmiş olanların hepsini seç
       for (const a of document.querySelectorAll(PHOTO_LINK)) {
-        const id = photoId(a);
-        if (!id || !targets.has(id) || found.has(id) || !visible(a)) continue;
+        const aid = photoId(a);
+        if (!aid || !targets.has(aid) || found.has(aid) || !visible(a)) continue;
         const r = await selectTile(a);
         if (!r.ok) return fail(r);
-        found.add(id);
+        found.add(aid);
         report(found.size, targets.size);
-      }
-      const before = scroller.scrollTop;
-      scroller.scrollTop = before + scroller.clientHeight * 0.85;
-      await sleep(400);
-      if (scroller.scrollTop === before) {
-        if (++stuck >= 8) break;
-        await sleep(800);
-      } else {
-        stuck = 0;
       }
     }
     if (bulkStop) return fail({ error: "durduruldu" });
@@ -291,15 +330,29 @@
     if (count !== found.size) return fail({ error: `seçili sayı tutmuyor (${count} ≠ ${found.size})` });
     const del = await waitFor(findDeleteButton, 5000);
     if (!del) return fail({ error: "toplu silme düğmesi bulunamadı", buttons: visibleButtonLabels() });
+    const clicked = { del: del.getAttribute("aria-label") };
     del.click();
     const confirm = await waitFor(findConfirmButton, 5000);
-    if (!confirm) return fail({ error: "onay penceresi çıkmadı", buttons: visibleButtonLabels() });
+    if (!confirm) return fail({ error: "onay penceresi çıkmadı", ...clicked, buttons: visibleButtonLabels() });
+    clicked.confirm = (confirm.textContent || confirm.getAttribute("aria-label") || "").trim();
     confirm.click();
-    const done = await waitFor(() => selectionCount() === 0, 30000);
-    return done
-      ? { ok: true, trashed: [...found], missing }
-      : { ok: false, error: "silme doğrulanamadı; Google Fotoğraflar'da kontrol et", trashed: [] };
+    if (!(await waitFor(() => selectionCount() === 0, 30000))) {
+      return { ok: false, error: "silme doğrulanamadı; Google Fotoğraflar'da kontrol et", ...clicked, trashed: [] };
+    }
+
+    // Gerçekten silindi mi? Seçilenlerden birkaçının yerine gidip ızgaradan kalktığını doğrula.
+    const list = [...found];
+    const sample = [...new Set([...list.slice(0, 3), ...list.slice(-3)])];
+    for (const id of sample) {
+      await jumpTo(scroller, orders, orders.get(id));
+      if (!(await waitFor(() => !tileById(id), 6000))) {
+        return { ok: false, error: "Google Fotoğraflar silmeyi uygulamadı (öğe hâlâ ızgarada)", ...clicked, trashed: [] };
+      }
+    }
+    return { ok: true, trashed: list, missing, ...clicked };
   }
+
+  const tileById = (id) => document.querySelector(`a[href*="photo/${id}"]`);
 
   function visibleButtonLabels() {
     return [...document.querySelectorAll('button, [role="button"]')]

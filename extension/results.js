@@ -475,6 +475,7 @@ async function trashFast(ids) {
       const chunk = ordered.slice(i, i + BULK_CHUNK);
       await navigate(workerTabId, `https://photos.google.com${meta.prefix || ""}/?kopyabulucu=1`);
       const res = await sendWithRetry(workerTabId, { type: "bulkTrash", ids: chunk });
+      console.info("[Kopya Bulucu] toplu silme sonucu", res);
       await markTrashed(res.trashed || []);
       trashed += (res.trashed || []).length;
       if (!res.ok) return { trashed, error: res };
