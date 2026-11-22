@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kopya Sonuçları</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --surface: #ffffff; --border: #e2e1dc; --text: #1d1d1b; --muted: #6b6a65;
+    --accent: #2f6fde; --keep: #1f8a4c; --warn: #e8b23a; --del: #c93a2e; --del-bg: #fbe8e6; --chip: #efeee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --surface: #201f1e; --border: #34332f; --text: #ecebe6; --muted: #9b9a93;
+            --accent: #6b9cf0; --keep: #4cc47c; --warn: #e8b23a; --del: #f06b5f; --del-bg: #3d1f1c; --chip: #2b2a27; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; padding-bottom: 80px; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--border);
+           padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 10px 24px; align-items: center; }
+  h1 { font-size: 16px; margin: 0; }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; color: var(--muted); }
+  .stats b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .spacer { flex: 1; }
+  label.slider { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  button, select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+           border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { background: var(--del); border-color: var(--del); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+  main { max-width: 1400px; margin: 0 auto; padding: 16px; }
+  .notice { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  progress { width: 100%; height: 8px; }
+  .group { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; }
+  .group-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .chip { background: var(--chip); border-radius: 99px; padding: 2px 9px; font-size: 12px; color: var(--muted); }
+  .items { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; padding: 14px; }
+  .item { border: 2px solid transparent; border-radius: 10px; padding: 6px; background: var(--bg); }
+  .item.selected { border-color: var(--del); background: var(--del-bg); }
+  .item.selected img { opacity: .5; }
+  .item.trashed { opacity: .35; pointer-events: none; }
+  .thumb { position: relative; aspect-ratio: 1; background: var(--chip); border-radius: 6px; overflow: hidden; cursor: pointer; }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .tag { position: absolute; left: 6px; top: 6px; font-size: 11px; padding: 1px 7px; border-radius: 99px;
+         background: rgba(0,0,0,.65); color: #fff; }
+  .mark { position: absolute; right: 6px; top: 6px; font-size: 11px; padding: 1px 7px; border-radius: 99px;
+          background: var(--del); color: #fff; display: none; }
+  .item.selected .mark { display: block; }
+  .best { position: absolute; right: 6px; top: 6px; font-size: 11px; padding: 1px 7px; border-radius: 99px;
+          background: var(--keep); color: #fff; display: none; }
+  .item.is-best:not(.selected) { border-color: var(--keep); }
+  .item.is-best:not(.selected) .best { display: block; }
+  .res { color: var(--text); font-variant-numeric: tabular-nums; }
+  .chip.same { background: var(--keep); color: #fff; }
+  .chip.burst { background: var(--warn); color: #1d1d1b; }
+  .chip.different { color: var(--text); }
+  .zoom { position: absolute; left: 6px; bottom: 6px; padding: 2px 7px; font-size: 13px; border: none;
+          background: rgba(0,0,0,.6); color: #fff; border-radius: 6px; }
+  .zoom:hover { background: rgba(0,0,0,.85); }
+  #lightbox { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.9); display: none;
+              align-items: center; justify-content: center; padding: 16px; cursor: zoom-out; color: #fff; }
+  #lightbox.open { display: flex; }
+  #lightbox img { max-width: 100%; max-height: 100%; }
+  .meta { font-size: 12px; color: var(--muted); margin: 6px 2px 0; word-break: break-word; }
+  .meta a { color: var(--accent); }
+  .more { display: block; margin: 20px auto; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border);
+         padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; z-index: 5; }
+  .log { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kopya Sonuçları</h1>
+  <div class="stats" id="stats"></div>
+  <div class="spacer"></div>
+  <label class="slider" title="Düşük = sadece neredeyse birebir aynılar. Yüksek = daha benzer olanlar da.">
+    Hassasiyet <input type="range" id="threshold" min="0" max="16" value="6"> <b id="threshold-val">6</b>
+  </label>
+  <select id="media">
+    <option value="all">Fotoğraf + video</option>
+    <option value="photo">Sadece fotoğraf</option>
+    <option value="video">Sadece video</option>
+  </select>
+  <select id="kind" title="Çekim zamanlarına göre grup türü">
+    <option value="all">Tüm gruplar</option>
+    <option value="same">Aynı anda çekilmiş</option>
+    <option value="burst">Seri çekimler</option>
+    <option value="different">Farklı zamanlarda</option>
+  </select>
+</header>
+
+<main>
+  <div class="notice" id="notice" hidden></div>
+  <div id="list"></div>
+</main>
+
+<div class="bar">
+  <button id="select-all" title="Her grupta en yüksek çözünürlüklü olanı tut, gerisini seç">Her grupta en iyisi hariç seç</button>
+  <button id="clear">Seçimi temizle</button>
+  <span class="spacer"></span>
+  <span class="log" id="log"></span>
+  <button id="stop" hidden>Durdur</button>
+  <select id="trash-mode" title="Hızlı: kütüphane ızgarasında toplu seçip siler. Tek tek: her öğeyi açıp siler.">
+    <option value="fast">Hızlı (toplu)</option>
+    <option value="slow">Tek tek (yavaş)</option>
+  </select>
+  <button class="danger" id="trash" disabled>Çöp kutusuna taşı</button>
+</div>
+
+<div id="lightbox"></div>
+
+<script type="module" src="results.js"></script>
+</body>
+</html>

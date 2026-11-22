@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Fotoğraf Kopya Bulucu",
+  "version": "0.3.0",
+  "description": "Google Fotoğraflar kütüphanendeki kopya fotoğraf ve videoları bulur, çöp kutusuna taşır.",
+  "permissions": ["storage", "unlimitedStorage"],
+  "host_permissions": ["https://photos.google.com/*", "https://*.googleusercontent.com/*",
+                       "https://*.usercontent.google.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Kopya sonuçlarını aç" },
+  "content_scripts": [
+    {
+      "matches": ["https://photos.google.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
