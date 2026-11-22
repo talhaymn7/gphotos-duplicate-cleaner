@@ -71,6 +71,8 @@
   .bar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--border);
          padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; z-index: 5; }
   .log { color: var(--muted); font-size: 13px; }
+  .sel-size { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .sel-size b { color: var(--text); }
 </style>
 </head>
 <body>
@@ -102,6 +104,7 @@
 <div class="bar">
   <button id="select-all" title="Her grupta en yüksek çözünürlüklü olanı tut, gerisini seç">Her grupta en iyisi hariç seç</button>
   <button id="clear">Seçimi temizle</button>
+  <span class="sel-size" id="sel-size"></span>
   <span class="spacer"></span>
   <span class="log" id="log"></span>
   <button id="stop" hidden>Durdur</button>

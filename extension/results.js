@@ -16,6 +16,8 @@ let shown = 0;
 let selected = new Set();
 let stopRequested = false;
 let workerTabId = null;
+let freed = { count: 0, bytes: 0 }; // bu eklentiyle şimdiye kadar çöpe taşınanlar
+let trashedBytes = 0; // bu silme işleminde taşınanların yaklaşık boyutu
 
 // lh3 önizleme URL'sindeki boyut parametresini değiştir
 const thumbUrl = (url, size) => url.replace(/=[^?]*/, `=w${size}-h${size}`);
@@ -34,6 +36,7 @@ async function pool(list, n, fn) {
 async function load() {
   const all = await chrome.storage.local.get(null);
   meta = all.meta || {};
+  freed = all.freed || freed;
   selected = new Set(all.sel || []);
   items = new Map();
   for (const [k, v] of Object.entries(all)) {
@@ -302,8 +305,13 @@ function renderStats() {
     <span><b>${extra.toLocaleString("tr-TR")}</b> fazlalık</span>
     ${errors ? `<span>${errors} okunamadı</span>` : ""}
     <span title="Son tarama">${when}${meta.complete === false ? " (yarım)" : ""}</span>`;
+  if (freed.count) {
+    $("#stats").insertAdjacentHTML("beforeend",
+      `<span title="Bu eklentiyle çöp kutusuna taşınanların toplamı">temizlenen <b>${freed.count.toLocaleString("tr-TR")}</b> öğe ≈ <b>${fmtBytes(freed.bytes)}</b></span>`);
+  }
   $("#trash").disabled = selected.size === 0;
   $("#trash").textContent = `Çöp kutusuna taşı (${selected.size})`;
+  renderSelSize();
 
   if (!items.size) {
     $("#list").innerHTML = `<div class="notice">Henüz tarama yok. <a href="https://photos.google.com/" target="_blank">photos.google.com</a>
@@ -311,6 +319,32 @@ function renderStats() {
   } else if (!groups.length) {
     $("#list").innerHTML = `<div class="notice">Bu ayarlarla kopya bulunamadı.</div>`;
   }
+}
+
+const fmtBytes = (b) => (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${(b / 1e6).toFixed(1)} MB`);
+
+// Seçilenlerin yaklaşık toplam boyutu. Videolarda elimizdeki boyut sadece kapak resmine ait,
+// ölçülmemiş öğelerde de boyut yok; bunlar toplama katılmaz, ayrıca belirtilir.
+function selectedSize(ids) {
+  let bytes = 0;
+  let unknown = 0;
+  for (const id of ids) {
+    const it = items.get(id);
+    if (it && !it.video && it.bytes) bytes += it.bytes;
+    else unknown++;
+  }
+  return { bytes, unknown };
+}
+
+function renderSelSize() {
+  const el = $("#sel-size");
+  if (!selected.size) {
+    el.textContent = "";
+    return;
+  }
+  const { bytes, unknown } = selectedSize(selected);
+  el.innerHTML = `Silinecek: <b>${selected.size.toLocaleString("tr-TR")}</b> öğe ≈ <b>${fmtBytes(bytes)}</b>` +
+    (unknown ? ` <span title="Videolar ve çözünürlüğü henüz ölçülmemiş öğeler">(+${unknown} öğenin boyutu bilinmiyor)</span>` : "");
 }
 
 function renderMore() {
@@ -391,6 +425,7 @@ function fillTile(el, it) {
 function updateTile(id) {
   const el = document.querySelector(`.item[data-id="${CSS.escape(id)}"]`);
   if (el) fillTile(el, items.get(id));
+  if (selected.has(id)) renderSelSize();
 }
 
 function toggle(id) {
@@ -452,6 +487,10 @@ async function sendWithRetry(tabId, msg) {
 }
 
 async function markTrashed(ids) {
+  if (!ids.length) return;
+  const { bytes } = selectedSize(ids);
+  freed = { count: freed.count + ids.length, bytes: freed.bytes + bytes };
+  trashedBytes += bytes;
   for (const id of ids) {
     selected.delete(id);
     const it = items.get(id);
@@ -464,7 +503,8 @@ async function markTrashed(ids) {
     }
   }
   await chrome.storage.local.remove(ids.flatMap((id) => ["i:" + id, "h:" + id, "d:" + id]));
-  await chrome.storage.local.set({ sel: [...selected] });
+  await chrome.storage.local.set({ sel: [...selected], freed });
+  renderSelSize();
 }
 
 // Hızlı: kütüphane ızgarasında hedefleri seçip toplu siler (BULK_CHUNK'lık parçalar halinde)
@@ -532,6 +572,7 @@ async function trashSelected() {
                `Açılacak pencereyi işlem bitene kadar kapatma, küçültme ve içinde gezinme. Devam?`)) return;
 
   stopRequested = false;
+  trashedBytes = 0;
   $("#trash").disabled = true;
   $("#stop").hidden = false;
   const win = await chrome.windows.create({ url: "https://photos.google.com/?kopyabulucu=1", type: "popup", width: 1000, height: 760 });
@@ -575,7 +616,7 @@ async function trashSelected() {
     workerTabId = null;
     $("#stop").hidden = true;
   }
-  $("#log").textContent = `${total} öğe çöp kutusuna taşındı${message}.`;
+  $("#log").textContent = `${total} öğe çöp kutusuna taşındı (≈ ${fmtBytes(trashedBytes)})${message}.`;
   renderStats();
 }
 
